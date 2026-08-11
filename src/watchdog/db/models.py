@@ -108,7 +108,10 @@ class Run(Base, CreatedAtMixin):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="running")
     started_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), nullable=False)
     finished_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    total_cost_usd: Mapped[Numeric] = mapped_column(Numeric(12, 6), nullable=False, default=0)
+    # Numeric(14, 10): 4 integer digits is far more than a nightly run
+    # will ever cost, and 10 decimal digits keeps the sum of many
+    # sub-micro-dollar calls exact rather than rounded.
+    total_cost_usd: Mapped[Numeric] = mapped_column(Numeric(14, 10), nullable=False, default=0)
     pipeline_git_sha: Mapped[str] = mapped_column(String(40), nullable=False)
 
     suite: Mapped["Suite"] = relationship()
@@ -132,7 +135,7 @@ class Result(Base, CreatedAtMixin):
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    cost_usd: Mapped[Numeric | None] = mapped_column(Numeric(12, 6), nullable=True)
+    cost_usd: Mapped[Numeric | None] = mapped_column(Numeric(14, 10), nullable=True)
     provider_model_version: Mapped[str | None] = mapped_column(String(128), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
