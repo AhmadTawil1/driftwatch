@@ -47,6 +47,12 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-airflow}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-airflow}
       POSTGRES_DB: airflow
+    ports:
+      # Published for local dev tooling (Alembic, seed.py, psql) running
+      # on the host — bound to localhost only, not exposed beyond this
+      # machine. The day-7 VM will not carry this over. Host side is 5433
+      # because something else on this machine already owns 5432.
+      - "127.0.0.1:5433:5432"
     volumes:
       - postgres-db-volume:/var/lib/postgresql/data
       - ./docker/postgres-initdb:/docker-entrypoint-initdb.d

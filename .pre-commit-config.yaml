@@ -4,4 +4,8 @@ repos:
     hooks:
       - id: detect-secrets
         args: ["--baseline", ".secrets.baseline"]
-        exclude: package.lock.json|uv.lock
+        # alembic/versions/*: revision IDs are random hex strings by
+        # design (Alembic's own convention) and reliably false-positive
+        # as "high entropy" secrets — excluded rather than pragma'd on
+        # every migration file, since every future migration hits this.
+        exclude: package.lock.json|uv.lock|alembic/versions/.*\.py
