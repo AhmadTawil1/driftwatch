@@ -1,0 +1,9 @@
+# Pinned to the exact versions resolved in uv.lock, so the container's
+# environment matches local dev exactly. apache-airflow itself is not
+# listed here — it already ships in the base image.
+sqlalchemy==2.0.51
+alembic==1.19.1
+psycopg[binary]==3.3.4
+httpx==0.28.1
+pydantic==2.13.4
+pyyaml==6.0.3

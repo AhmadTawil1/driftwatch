@@ -12,11 +12,15 @@ wheels/
 # Secrets
 .env
 
-# Airflow runtime
-logs/
+# Airflow runtime — keep the empty logs/ dir itself (needed for the
+# docker-compose bind mount) but not what gets written into it
+logs/*
+!logs/.gitkeep
 airflow.cfg
 airflow-webserver.pid
 
-# Planning docs, not part of the shipped repo
-A1-BUILD-WEEK.md
-A1-model-drift-cost-watchdog-PLAN.md
+# Markdown notes/planning docs, not part of the shipped repo
+*.md
+!README.md
+
+.claude
