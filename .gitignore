@@ -1,0 +1,22 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Secrets
+.env
+
+# Airflow runtime
+logs/
+airflow.cfg
+airflow-webserver.pid
+
+# Planning docs, not part of the shipped repo
+A1-BUILD-WEEK.md
+A1-model-drift-cost-watchdog-PLAN.md
