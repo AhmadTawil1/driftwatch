@@ -1,0 +1,303 @@
+# Task suite, version 1. 40 tasks across four categories, weighted toward
+# deterministic scoring (34/40 here) — see PLAN.md section 1.4/2.4 for why:
+# a graded task's score can move because the grader moved, not just because
+# the model under test did.
+#
+# scoring_method meanings (implemented day 4):
+#   exact             - normalized string equality against `expected`
+#   regex             - `expected` is a regex the output must match
+#   json_schema       - `expected` is a JSON Schema the output (as JSON) must validate against
+#   numeric_tolerance - a number is extracted from the output and compared to `expected` within tolerance
+#   graded            - a pinned grader model applies `rubric` to the output
+
+tasks:
+  # --- structured_extraction (10, all json_schema — deterministic) ---
+  - id: extract_person_age
+    category: structured_extraction
+    scoring_method: json_schema
+    prompt: |
+      Extract the person's name and age into JSON with keys "name" (string) and "age" (integer).
+      Respond with ONLY the JSON object, no other text.
+
+      Sentence: "John Smith is 34 years old and lives in Boston."
+    expected: '{"type": "object", "properties": {"name": {"type": "string"}, "age": {"type": "integer"}}, "required": ["name", "age"]}'
+
+  - id: extract_product_price
+    category: structured_extraction
+    scoring_method: json_schema
+    prompt: |
+      Extract the product name and price into JSON with keys "product" (string) and "price_usd" (number).
+      Respond with ONLY the JSON object, no other text.
+
+      Sentence: "The Widget Pro is on sale for $24.99."
+    expected: '{"type": "object", "properties": {"product": {"type": "string"}, "price_usd": {"type": "number"}}, "required": ["product", "price_usd"]}'
+
+  - id: extract_date
+    category: structured_extraction
+    scoring_method: json_schema
+    prompt: |
+      Extract the date into JSON with keys "year", "month", "day" (all integers).
+      Respond with ONLY the JSON object, no other text.
+
+      Sentence: "The meeting is scheduled for March 5, 2027."
+    expected: '{"type": "object", "properties": {"year": {"type": "integer"}, "month": {"type": "integer"}, "day": {"type": "integer"}}, "required": ["year", "month", "day"]}'
+
+  - id: extract_contact
+    category: structured_extraction
+    scoring_method: json_schema
+    prompt: |
+      Extract the email and phone number into JSON with keys "email" (string) and "phone" (string).
+      Respond with ONLY the JSON object, no other text.
+
+      Sentence: "Reach Sarah at sarah@example.com or call 555-0142."
+    expected: '{"type": "object", "properties": {"email": {"type": "string"}, "phone": {"type": "string"}}, "required": ["email", "phone"]}'
+
+  - id: extract_address
+    category: structured_extraction
+    scoring_method: json_schema
+    prompt: |
+      Extract the address into JSON with keys "street" (string), "city" (string), "zip" (string).
+      Respond with ONLY the JSON object, no other text.
+
+      Sentence: "Send it to 42 Baker Street, Springfield, 12345."
+    expected: '{"type": "object", "properties": {"street": {"type": "string"}, "city": {"type": "string"}, "zip": {"type": "string"}}, "required": ["street", "city", "zip"]}'
+
+  - id: extract_event
+    category: structured_extraction
+    scoring_method: json_schema
+    prompt: |
+      Extract the event name and date into JSON with keys "event" (string) and "date" (string).
+      Respond with ONLY the JSON object, no other text.
+
+      Sentence: "Join us for the Annual Tech Summit on June 10th."
+    expected: '{"type": "object", "properties": {"event": {"type": "string"}, "date": {"type": "string"}}, "required": ["event", "date"]}'
+
+  - id: extract_book
+    category: structured_extraction
+    scoring_method: json_schema
+    prompt: |
+      Extract the book title and author into JSON with keys "title" (string) and "author" (string).
+      Respond with ONLY the JSON object, no other text.
+
+      Sentence: "Dune, written by Frank Herbert, is a science fiction classic."
+    expected: '{"type": "object", "properties": {"title": {"type": "string"}, "author": {"type": "string"}}, "required": ["title", "author"]}'
+
+  - id: extract_temperature
+    category: structured_extraction
+    scoring_method: json_schema
+    prompt: |
+      Extract the temperature into JSON with keys "value" (number) and "unit" (string, either "C" or "F").
+      Respond with ONLY the JSON object, no other text.
+
+      Sentence: "It's going to be 72 degrees Fahrenheit tomorrow."
+    expected: '{"type": "object", "properties": {"value": {"type": "number"}, "unit": {"type": "string"}}, "required": ["value", "unit"]}'
+
+  - id: extract_coordinates
+    category: structured_extraction
+    scoring_method: json_schema
+    prompt: |
+      Extract the coordinates into JSON with keys "lat" (number) and "lon" (number).
+      Respond with ONLY the JSON object, no other text.
+
+      Sentence: "The site is located at latitude 40.7128, longitude -74.0060."
+    expected: '{"type": "object", "properties": {"lat": {"type": "number"}, "lon": {"type": "number"}}, "required": ["lat", "lon"]}'
+
+  - id: extract_order
+    category: structured_extraction
+    scoring_method: json_schema
+    prompt: |
+      Extract the order details into JSON with keys "order_id" (string) and "status" (string).
+      Respond with ONLY the JSON object, no other text.
+
+      Sentence: "Order #A1029 has shipped and is now in transit."
+    expected: '{"type": "object", "properties": {"order_id": {"type": "string"}, "status": {"type": "string"}}, "required": ["order_id", "status"]}'
+
+  # --- factual_recall (10, exact — deterministic) ---
+  - id: fact_gold_symbol
+    category: factual_recall
+    scoring_method: exact
+    prompt: "What is the chemical symbol for gold? Answer with just the symbol."
+    expected: "Au"
+
+  - id: fact_continents
+    category: factual_recall
+    scoring_method: exact
+    prompt: "How many continents are there? Answer with just the number."
+    expected: "7"
+
+  - id: fact_water_boiling
+    category: factual_recall
+    scoring_method: exact
+    prompt: "At what temperature in Celsius does water boil at sea level? Answer with just the number."
+    expected: "100"
+
+  - id: fact_largest_planet
+    category: factual_recall
+    scoring_method: exact
+    prompt: "What is the largest planet in our solar system? Answer with just the planet name."
+    expected: "Jupiter"
+
+  - id: fact_smallest_prime
+    category: factual_recall
+    scoring_method: exact
+    prompt: "What is the smallest prime number? Answer with just the number."
+    expected: "2"
+
+  - id: fact_human_bones
+    category: factual_recall
+    scoring_method: exact
+    prompt: "How many bones are in the adult human body? Answer with just the number."
+    expected: "206"
+
+  - id: fact_speed_of_light
+    category: factual_recall
+    scoring_method: regex
+    prompt: "Approximately how fast does light travel in a vacuum, in km/s? Answer with just the approximate number, rounded to the nearest thousand."
+    expected: "^300,?000$"
+
+  - id: fact_shakespeare_plays
+    category: factual_recall
+    scoring_method: exact
+    prompt: "Who wrote the play 'Romeo and Juliet'? Answer with just the author's name."
+    expected: "William Shakespeare"
+
+  - id: fact_periodic_table_h
+    category: factual_recall
+    scoring_method: exact
+    prompt: "What is the atomic number of hydrogen? Answer with just the number."
+    expected: "1"
+
+  - id: fact_ocean_largest
+    category: factual_recall
+    scoring_method: exact
+    prompt: "What is the largest ocean on Earth? Answer with just the ocean's name."
+    expected: "Pacific Ocean"
+
+  # --- instruction_following (10: 7 deterministic + 3 graded) ---
+  - id: instr_exact_word
+    category: instruction_following
+    scoring_method: exact
+    prompt: "Respond with exactly the word 'OK' and nothing else."
+    expected: "OK"
+
+  - id: instr_uppercase
+    category: instruction_following
+    scoring_method: exact
+    prompt: "Convert this to uppercase and respond with only the result: hello world"
+    expected: "HELLO WORLD"
+
+  - id: instr_digits_only
+    category: instruction_following
+    scoring_method: exact
+    prompt: "What is 7 times 8? Respond with only the digits, no other characters."
+    expected: "56"
+
+  - id: instr_yes_no
+    category: instruction_following
+    scoring_method: exact
+    prompt: "Answer yes or no, lowercase, nothing else: is the sky blue on a clear day?"
+    expected: "yes"
+
+  - id: instr_word_count
+    category: instruction_following
+    scoring_method: exact
+    prompt: "How many words are in this sentence? Respond with only the number. Sentence: 'The quick brown fox jumps.'"
+    expected: "5"
+
+  - id: instr_three_colors
+    category: instruction_following
+    scoring_method: regex
+    prompt: "List exactly three colors, comma separated, all lowercase, nothing else. Example format: red, blue, green"
+    expected: "^[a-z]+, [a-z]+, [a-z]+$"
+
+  - id: instr_reverse_words
+    category: instruction_following
+    scoring_method: exact
+    prompt: "Reverse the order of these words and respond with only the result, space separated: sun the under nothing new is"
+    expected: "is new nothing under the sun"
+
+  - id: instr_polite_decline
+    category: instruction_following
+    scoring_method: graded
+    prompt: "Write a two-sentence polite decline of a meeting invitation."
+    rubric: "Response is polite in tone, is exactly two sentences, and clearly declines the meeting without being rude or overly long."
+
+  - id: instr_summarize
+    category: instruction_following
+    scoring_method: graded
+    prompt: |
+      Summarize this paragraph in exactly one sentence:
+
+      "The city council voted Tuesday to approve funding for a new public
+      library branch in the east district. The project, expected to cost
+      $4.2 million, will include a children's reading room, a maker space,
+      and expanded parking. Construction is set to begin next spring and
+      finish within eighteen months."
+    rubric: "Response is exactly one sentence and captures the core point (council approved funding for a new library branch) without missing the main subject or adding unrelated detail."
+
+  - id: instr_formal_rewrite
+    category: instruction_following
+    scoring_method: graded
+    prompt: "Rewrite this message in a more formal tone: 'hey whats up can u send me the file when u get a sec'"
+    rubric: "Response is clearly more formal than the original, preserves the core request (asking for the file to be sent), and reads as a complete, professional message."
+
+  # --- reasoning (10: 7 deterministic + 3 graded) ---
+  - id: reason_train_speed
+    category: reasoning
+    scoring_method: numeric_tolerance
+    prompt: "A train travels 60 miles in 1.5 hours. What is its speed in miles per hour? Answer with just the number."
+    expected: "40"
+
+  - id: reason_percentage
+    category: reasoning
+    scoring_method: numeric_tolerance
+    prompt: "What is 15% of 200? Answer with just the number."
+    expected: "30"
+
+  - id: reason_syllogism
+    category: reasoning
+    scoring_method: exact
+    prompt: "All bloops are razzies. All razzies are lazzies. Is every bloop necessarily a lazzy? Answer yes or no, lowercase, nothing else."
+    expected: "yes"
+
+  - id: reason_trick_question
+    category: reasoning
+    scoring_method: numeric_tolerance
+    prompt: "A farmer has 17 sheep. All but 9 die. How many sheep are left? Answer with just the number."
+    expected: "9"
+
+  - id: reason_sequence
+    category: reasoning
+    scoring_method: numeric_tolerance
+    prompt: "What is the next number in this sequence: 2, 4, 8, 16, ? Answer with just the number."
+    expected: "32"
+
+  - id: reason_day_of_week
+    category: reasoning
+    scoring_method: exact
+    prompt: "If today is Wednesday, what day of the week will it be in 10 days? Answer with just the day name."
+    expected: "Saturday"
+
+  - id: reason_sum_series
+    category: reasoning
+    scoring_method: numeric_tolerance
+    prompt: "What is the sum of the first 10 positive integers (1 through 10)? Answer with just the number."
+    expected: "55"
+
+  - id: reason_why_sky_blue
+    category: reasoning
+    scoring_method: graded
+    prompt: "Explain in 2-3 sentences why the sky appears blue during the day."
+    rubric: "Response correctly references light scattering (Rayleigh scattering or an equivalent correct explanation involving shorter wavelengths scattering more), stays within 2-3 sentences, and doesn't state anything factually wrong."
+
+  - id: reason_profit_margin
+    category: reasoning
+    scoring_method: graded
+    prompt: "A shopkeeper buys an item for $80 and sells it for $100. What is the profit margin as a percentage? Show your reasoning."
+    rubric: "Arrives at 25% profit margin (on cost) with correct, clearly shown reasoning — accept either margin-on-cost or margin-on-sale-price framing as long as the arithmetic for that framing is correct and labeled."
+
+  - id: reason_halting_problem
+    category: reasoning
+    scoring_method: graded
+    prompt: "Explain the halting problem in simple terms, in 2-4 sentences."
+    rubric: "Correctly conveys that the halting problem is about determining whether a program will finish running or loop forever, and that no general algorithm can solve this for all possible programs. Accessible language, no major inaccuracies."
