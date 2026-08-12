@@ -1,0 +1,23 @@
+                                                                         QUERY PLAN                                                                          
+-------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Sort  (cost=2625.17..2626.04 rows=348 width=112) (actual time=8.316..8.321 rows=90 loops=1)
+   Sort Key: (date_trunc('day'::text, created_at))
+   Sort Method: quicksort  Memory: 31kB
+   Buffers: shared hit=415 read=12
+   ->  HashAggregate  (cost=2603.52..2610.48 rows=348 width=112) (actual time=8.233..8.289 rows=90 loops=1)
+         Group Key: date_trunc('day'::text, created_at)
+         Batches: 1  Memory Usage: 157kB
+         Buffers: shared hit=412 read=12
+         ->  Bitmap Heap Scan on results r  (cost=156.02..2467.27 rows=10900 width=24) (actual time=0.380..5.166 rows=10801 loops=1)
+               Recheck Cond: ((model_id = 1) AND (created_at >= (now() - '90 days'::interval)))
+               Heap Blocks: exact=412
+               Buffers: shared hit=412 read=12
+               ->  Bitmap Index Scan on ix_results_model_id_created_at  (cost=0.00..153.30 rows=10900 width=0) (actual time=0.344..0.344 rows=10801 loops=1)
+                     Index Cond: ((model_id = 1) AND (created_at >= (now() - '90 days'::interval)))
+                     Buffers: shared read=12
+ Planning:
+   Buffers: shared hit=189 read=2
+ Planning Time: 0.445 ms
+ Execution Time: 8.385 ms
+(19 rows)
+

@@ -1,0 +1,20 @@
+                                                         QUERY PLAN                                                         
+----------------------------------------------------------------------------------------------------------------------------
+ Sort  (cost=3700.79..3701.66 rows=348 width=112) (actual time=18.063..18.067 rows=90 loops=1)
+   Sort Key: (date_trunc('day'::text, created_at))
+   Sort Method: quicksort  Memory: 31kB
+   Buffers: shared hit=2069
+   ->  HashAggregate  (cost=3679.14..3686.10 rows=348 width=112) (actual time=17.988..18.036 rows=90 loops=1)
+         Group Key: date_trunc('day'::text, created_at)
+         Batches: 1  Memory Usage: 157kB
+         Buffers: shared hit=2066
+         ->  Seq Scan on results r  (cost=0.00..3542.87 rows=10901 width=24) (actual time=0.006..15.227 rows=10801 loops=1)
+               Filter: ((model_id = 1) AND (created_at >= (now() - '90 days'::interval)))
+               Rows Removed by Filter: 61680
+               Buffers: shared hit=2066
+ Planning:
+   Buffers: shared hit=156
+ Planning Time: 0.395 ms
+ Execution Time: 18.126 ms
+(16 rows)
+

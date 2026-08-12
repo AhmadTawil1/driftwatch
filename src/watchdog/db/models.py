@@ -127,6 +127,14 @@ class Result(Base, CreatedAtMixin):
         # What makes re-running a date idempotent — enforced by the
         # database, not by application logic (BUILD-WEEK day 1).
         UniqueConstraint("run_id", "model_id", "task_id", "repeat_index"),
+        # Added day 6, only after EXPLAIN (ANALYZE, BUFFERS) proved the
+        # 90-day history query was doing a full Seq Scan without them —
+        # see docs/explain-before.txt / docs/explain-after.txt. Serves
+        # the history query (model_id + a created_at range) and the
+        # scoring stage (looking up unscored rows for one run_id, joined
+        # to model_id for grader attribution).
+        Index("ix_results_model_id_created_at", "model_id", text("created_at DESC")),
+        Index("ix_results_run_id_model_id", "run_id", "model_id"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
