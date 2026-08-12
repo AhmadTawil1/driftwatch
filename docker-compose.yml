@@ -31,9 +31,34 @@ x-airflow-common:
     AIRFLOW__DAG_PROCESSOR__MIN_FILE_PROCESS_INTERVAL: "60"
     AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/src/watchdog/dags
     PYTHONPATH: /opt/airflow/src
+    # Overrides the WATCHDOG_DATABASE_URL from .env (env_file above) —
+    # that value uses "localhost", correct for host tooling (Alembic,
+    # seed.py) but meaningless inside a container. `environment:` takes
+    # precedence over `env_file:` for the same key, so this wins here.
+    WATCHDOG_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-airflow}:${POSTGRES_PASSWORD:-airflow}@postgres/watchdog
+    # /opt/airflow/src and /opt/airflow/.git are two separate bind
+    # mounts — different filesystems from git's point of view — so
+    # `git rev-parse HEAD` refuses to walk from one up into the other
+    # without this. Harmless here; it only widens where git is willing
+    # to look, not what it trusts.
+    GIT_DISCOVERY_ACROSS_FILESYSTEM: "1"
+    # The mounted .git is owned by the host user, not the container's
+    # airflow user (uid 50000) — git's "dubious ownership" check (a
+    # real security feature, for a real threat model that doesn't apply
+    # to a read-only dev bind mount) would otherwise refuse to read it.
+    # Set via env rather than a config file, so it survives container
+    # recreation without needing to persist anything.
+    GIT_CONFIG_COUNT: "1"
+    GIT_CONFIG_KEY_0: "safe.directory"
+    GIT_CONFIG_VALUE_0: "*"
   volumes:
     - ./src:/opt/airflow/src
     - ./logs:/opt/airflow/logs
+    # Read-only, just so DAG code can resolve the current commit's SHA
+    # for provenance (git_sha) — mounted so that walking up from
+    # /opt/airflow/src/watchdog finds it two levels up, the same
+    # relative position .git sits in on the host.
+    - ./.git:/opt/airflow/.git:ro
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
     &airflow-common-depends-on

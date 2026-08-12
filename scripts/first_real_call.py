@@ -13,7 +13,6 @@ Run with: uv run python scripts/first_real_call.py
 import asyncio
 import hashlib
 import os
-import subprocess
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -21,6 +20,7 @@ from dotenv import load_dotenv
 
 from watchdog.db.models import Model, ModelPrice, Provider, Result, Run, Suite, Task
 from watchdog.db.session import get_session
+from watchdog.git_info import git_sha
 from watchdog.providers.client import ProviderClient
 from watchdog.providers.pricing import Price
 
@@ -29,10 +29,6 @@ load_dotenv()
 PROVIDER_NAME = "openai"
 MODEL_NAME = "gpt-4o-mini"
 PROMPT = "What is 2 + 2? Answer with just the number."
-
-
-def git_sha() -> str:
-    return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
 
 
 async def main() -> None:

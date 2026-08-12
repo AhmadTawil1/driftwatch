@@ -11,7 +11,6 @@ Run with: uv run python suite_loader.py suites/v1.yaml
 
 import argparse
 import hashlib
-import subprocess
 from typing import Literal
 
 import yaml
@@ -20,6 +19,7 @@ from pydantic import BaseModel, model_validator
 
 from watchdog.db.models import Suite, Task
 from watchdog.db.session import get_session
+from watchdog.git_info import git_sha
 
 CATEGORIES = Literal["structured_extraction", "factual_recall", "instruction_following", "reasoning"]
 SCORING_METHODS = Literal["exact", "regex", "json_schema", "numeric_tolerance", "graded"]
@@ -53,10 +53,6 @@ class SuiteDef(BaseModel):
         if duplicates:
             raise ValueError(f"duplicate task ids: {sorted(duplicates)}")
         return self
-
-
-def git_sha() -> str:
-    return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
 
 
 def load_suite(path: str) -> None:

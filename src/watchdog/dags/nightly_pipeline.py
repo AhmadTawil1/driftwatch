@@ -1,0 +1,194 @@
+"""load_registry -> execute (one mapped task per active model) -> finalize_run.
+
+Scoring, drift detection, and alerting are separate stages, added on
+days 4-6 — this DAG only produces raw results rows. Nothing here
+re-calls a provider once a result is written; that's the whole point
+of the five-stage split (PLAN.md 3.1).
+"""
+
+import asyncio
+import os
+from datetime import date, datetime, timezone
+from decimal import Decimal
+
+from airflow.sdk import dag, task
+from sqlalchemy import func
+
+from watchdog.db.models import Model, ModelPrice, Provider, Result, Run, Suite
+from watchdog.db.session import get_session
+from watchdog.git_info import git_sha
+from watchdog.providers.client import ProviderClient
+from watchdog.providers.pricing import Price
+
+REPEATS = 3
+
+
+def _current_total(session, run_id: int) -> Decimal:
+    total = (
+        session.query(func.coalesce(func.sum(Result.cost_usd), 0))
+        .filter(Result.run_id == run_id)
+        .scalar()
+    )
+    return Decimal(total)
+
+
+def _mark_aborted(session, run_id: int) -> None:
+    session.query(Run).filter(Run.id == run_id, Run.status == "running").update(
+        {"status": "aborted_cost_cap"}
+    )
+    session.commit()
+
+
+@dag(schedule=None, catchup=False, tags=["driftwatch"])
+def nightly_pipeline():
+    @task
+    def load_registry() -> list[dict]:
+        session = get_session()
+        today = date.today()
+
+        suite = session.query(Suite).order_by(Suite.version.desc()).first()
+        if suite is None:
+            raise RuntimeError("no suite loaded — run suite_loader.py first")
+
+        run = Run(
+            suite_id=suite.id,
+            status="running",
+            started_at=datetime.now(timezone.utc),
+            pipeline_git_sha=git_sha(),
+        )
+        session.add(run)
+        session.commit()
+
+        tasks = [
+            {"id": t.id, "prompt": t.prompt, "prompt_hash": t.prompt_hash}
+            for t in suite.tasks
+        ]
+
+        work_items = []
+        models = session.query(Model).join(Provider).filter(Model.active.is_(True)).all()
+        for model in models:
+            price_row = (
+                session.query(ModelPrice)
+                .filter(ModelPrice.model_id == model.id, ModelPrice.effective_from <= today)
+                .order_by(ModelPrice.effective_from.desc())
+                .first()
+            )
+            if price_row is None:
+                # No price on file as of today — skip rather than guess a cost.
+                continue
+
+            work_items.append(
+                {
+                    "run_id": run.id,
+                    "suite_version": suite.version,
+                    "model_id": model.id,
+                    "model_name": model.name,
+                    "provider_name": model.provider.name,
+                    "provider_base_url": model.provider.base_url,
+                    "provider_credential_env_var": model.provider.credential_env_var,
+                    "provider_concurrency_limit": model.provider.concurrency_limit,
+                    "input_price_per_million": str(price_row.input_price_per_million),
+                    "output_price_per_million": str(price_row.output_price_per_million),
+                    "tasks": tasks,
+                    "git_sha": run.pipeline_git_sha,
+                }
+            )
+
+        session.close()
+        if not work_items:
+            raise RuntimeError("no active models with a current price — nothing to run")
+        return work_items
+
+    @task
+    def execute(model_work: dict) -> dict:
+        return asyncio.run(_execute_async(model_work))
+
+    async def _execute_async(model_work: dict) -> dict:
+        session = get_session()
+        run_id = model_work["run_id"]
+        model_id = model_work["model_id"]
+        price = Price(
+            input_per_million=Decimal(model_work["input_price_per_million"]),
+            output_per_million=Decimal(model_work["output_price_per_million"]),
+        )
+        cost_cap = os.environ.get("NIGHTLY_COST_CAP_USD")
+        cost_cap_usd = Decimal(cost_cap) if cost_cap else None
+
+        api_key = os.environ[model_work["provider_credential_env_var"]]
+        written = 0
+        skipped_cost_cap = 0
+
+        async with ProviderClient(
+            model_work["provider_name"],
+            model_work["provider_base_url"],
+            api_key,
+            concurrency_limit=model_work["provider_concurrency_limit"],
+        ) as client:
+            for task_def in model_work["tasks"]:
+                for repeat_index in range(REPEATS):
+                    if cost_cap_usd is not None and _current_total(session, run_id) >= cost_cap_usd:
+                        skipped_cost_cap += 1
+                        continue
+
+                    # One bad call must not kill this model's whole
+                    # dispatch loop (N8) — client.call() already turns
+                    # provider-side failures into a CallResult with
+                    # `error` set rather than raising, so this only
+                    # catches genuinely unexpected failures (e.g. a bug,
+                    # or the DB write itself failing).
+                    try:
+                        result = await client.call(model_work["model_name"], task_def["prompt"], price)
+                        error_text = result.error
+                    except Exception as exc:  # noqa: BLE001
+                        result = None
+                        error_text = f"{type(exc).__name__}: {exc}"
+
+                    row = Result(
+                        run_id=run_id,
+                        model_id=model_id,
+                        task_id=task_def["id"],
+                        repeat_index=repeat_index,
+                        output_text=result.output_text if result else None,
+                        latency_ms=result.latency_ms if result else None,
+                        input_tokens=result.input_tokens if result else None,
+                        output_tokens=result.output_tokens if result else None,
+                        cost_usd=result.cost_usd if result else None,
+                        provider_model_version=result.provider_model_version if result else None,
+                        error=error_text,
+                        suite_version=model_work["suite_version"],
+                        prompt_hash=task_def["prompt_hash"],
+                        git_sha=model_work["git_sha"],
+                    )
+                    session.add(row)
+                    session.commit()  # written on completion, never batched
+                    written += 1
+
+                    if cost_cap_usd is not None and _current_total(session, run_id) >= cost_cap_usd:
+                        _mark_aborted(session, run_id)
+
+        session.close()
+        return {"run_id": run_id, "model_id": model_id, "written": written, "skipped_cost_cap": skipped_cost_cap}
+
+    @task(trigger_rule="all_done")
+    def finalize_run(execute_results: list[dict]) -> None:
+        results = [r for r in execute_results if r]
+        if not results:
+            return
+        run_id = results[0]["run_id"]
+
+        session = get_session()
+        run = session.get(Run, run_id)
+        run.total_cost_usd = _current_total(session, run_id)
+        run.finished_at = datetime.now(timezone.utc)
+        if run.status == "running":
+            run.status = "completed"
+        session.commit()
+
+        total_written = sum(r["written"] for r in results)
+        print(f"run {run_id}: status={run.status} total_cost_usd={run.total_cost_usd} written={total_written}")
+        session.close()
+
+    finalize_run(execute.expand(model_work=load_registry()))
+
+
+nightly_pipeline()
