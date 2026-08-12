@@ -10,9 +10,11 @@ CHECK constraint would give the same safety without that cost, but even
 that's deferred until the set of values actually stabilizes.
 
 No indexes here beyond what correctness requires (the UNIQUE constraint
-on `results`, needed for idempotency). The performance indexes on
-`results` and `drift_checks` are added later, on days 5 and 6, on purpose
-— that's when EXPLAIN output proves whether they're needed.
+on `results`, needed for idempotency), except the one on `drift_checks`
+added in day 5 — that query pattern (latest checks for a model/category)
+is explicit in the plan from day 5 itself, not something to defer. The
+performance indexes on `results` are still added later, on day 6, on
+purpose — that's when EXPLAIN output proves whether they're needed.
 """
 
 from sqlalchemy import (
@@ -20,11 +22,13 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -160,6 +164,13 @@ class Result(Base, CreatedAtMixin):
 
 class DriftCheck(Base, CreatedAtMixin):
     __tablename__ = "drift_checks"
+    __table_args__ = (
+        # Serves the plan's own query pattern from day 5: "the most
+        # recent checks for this model and category" — history queries
+        # and the notifier both filter on (model_id, category) and want
+        # the newest rows first.
+        Index("ix_drift_checks_model_category_created_at", "model_id", "category", text("created_at DESC")),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     model_id: Mapped[int] = mapped_column(ForeignKey("models.id"), nullable=False)

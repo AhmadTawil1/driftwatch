@@ -1,13 +1,13 @@
 """load_registry -> execute (one mapped task per active model) ->
-score_deterministic -> score_graded -> finalize_run.
+score_deterministic -> score_graded -> detect_drift -> finalize_run.
 
-Drift detection and alerting are separate stages, added on days 5-6 —
-this DAG produces raw results rows and their scores. Scoring never
-re-calls the model *under test* once its result is written; that's the
-whole point of the five-stage split (PLAN.md 3.1). Graded scoring is
-the one stage that does call a provider — the pinned grader — which is
-exactly why it runs as its own stage, after deterministic scoring, so
-its cost stays separable (day 4).
+Alerting is the remaining stage, added on day 6. Scoring never re-calls
+the model *under test* once its result is written; that's the whole
+point of the five-stage split (PLAN.md 3.1). Graded scoring is the one
+stage that does call a provider — the pinned grader — which is exactly
+why it runs as its own stage, after deterministic scoring, so its cost
+stays separable (day 4). detect_drift never calls a provider at all —
+it only ever reads back what scoring already wrote (day 5).
 """
 
 import asyncio
@@ -21,6 +21,7 @@ from sqlalchemy.orm import joinedload
 
 from watchdog.db.models import Model, ModelPrice, Provider, Result, Run, Suite, Task
 from watchdog.db.session import get_session
+from watchdog.drift.detector import detect_for_run
 from watchdog.git_info import git_sha
 from watchdog.providers.client import ProviderClient
 from watchdog.providers.pricing import Price
@@ -259,15 +260,29 @@ def nightly_pipeline():
         return {"run_id": run_id, "graded": graded_count, "cost_usd": str(total_cost)}
 
     @task(trigger_rule="all_done")
-    def finalize_run(graded_result: dict) -> None:
+    def detect_drift(graded_result: dict) -> dict:
         run_id = graded_result.get("run_id")
+        if run_id is None:
+            return {**graded_result, "comparisons": 0, "fired": 0}
+
+        session = get_session()
+        comparisons = detect_for_run(session, run_id)
+        session.close()
+
+        fired = sum(1 for c in comparisons if c.fired)
+        print(f"run {run_id}: {len(comparisons)} drift comparisons, {fired} fired")
+        return {**graded_result, "comparisons": len(comparisons), "fired": fired}
+
+    @task(trigger_rule="all_done")
+    def finalize_run(drift_result: dict) -> None:
+        run_id = drift_result.get("run_id")
         if run_id is None:
             return
 
         session = get_session()
         run = session.get(Run, run_id)
         task_cost = _current_total(session, run_id)
-        grading_cost = Decimal(graded_result.get("cost_usd") or "0")
+        grading_cost = Decimal(drift_result.get("cost_usd") or "0")
         run.total_cost_usd = task_cost + grading_cost
         run.finished_at = datetime.now(timezone.utc)
         if run.status == "running":
@@ -276,12 +291,13 @@ def nightly_pipeline():
 
         print(
             f"run {run_id}: status={run.status} total_cost_usd={run.total_cost_usd} "
-            f"(task_cost={task_cost} grading_cost={grading_cost})"
+            f"(task_cost={task_cost} grading_cost={grading_cost}) "
+            f"drift_fired={drift_result.get('fired')}/{drift_result.get('comparisons')}"
         )
         session.close()
 
     execute_results = execute.expand(model_work=load_registry())
-    finalize_run(score_graded_stage(score_deterministic(execute_results)))
+    finalize_run(detect_drift(score_graded_stage(score_deterministic(execute_results))))
 
 
 nightly_pipeline()
