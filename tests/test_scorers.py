@@ -81,6 +81,18 @@ def test_json_schema_wrong_type():
     assert result.score == 0.0
 
 
+def test_json_schema_strips_markdown_code_fence():
+    fenced = '```json\n{"name": "John", "age": 34}\n```'
+    result = score_json_schema(fenced, PERSON_SCHEMA)
+    assert result.score == 1.0
+
+
+def test_json_schema_strips_code_fence_without_language_tag():
+    fenced = '```\n{"name": "John", "age": 34}\n```'
+    result = score_json_schema(fenced, PERSON_SCHEMA)
+    assert result.score == 1.0
+
+
 def test_json_schema_malformed_json_scores_zero_never_raises():
     result = score_json_schema("this is not json at all {", PERSON_SCHEMA)
     assert result.score == 0.0

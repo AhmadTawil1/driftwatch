@@ -44,11 +44,25 @@ def score_regex(output_text: str | None, expected: str) -> ScoreResult:
     return ScoreResult(0.0, f"output {output_text!r} did not match pattern {expected!r}")
 
 
+_CODE_FENCE_PATTERN = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?```$", re.DOTALL)
+
+
+def _strip_markdown_code_fence(text: str) -> str:
+    """Chat models routinely wrap JSON in ```json ... ``` even when told
+    not to — this is such a predictable, common formatting habit that
+    any real extraction scorer needs to see through it, or "did it
+    extract correctly" gets swamped by "did it follow a formatting
+    instruction," which isn't what structured_extraction is meant to
+    measure."""
+    match = _CODE_FENCE_PATTERN.match(text.strip())
+    return match.group(1) if match else text
+
+
 def score_json_schema(output_text: str | None, expected: str) -> ScoreResult:
     if output_text is None:
         return ScoreResult(0.0, "no output to score")
     try:
-        parsed_output = json.loads(output_text)
+        parsed_output = json.loads(_strip_markdown_code_fence(output_text))
     except json.JSONDecodeError as exc:
         return ScoreResult(0.0, f"malformed JSON: {exc}")
     try:

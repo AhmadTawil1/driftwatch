@@ -1,9 +1,13 @@
-"""load_registry -> execute (one mapped task per active model) -> finalize_run.
+"""load_registry -> execute (one mapped task per active model) ->
+score_deterministic -> score_graded -> finalize_run.
 
-Scoring, drift detection, and alerting are separate stages, added on
-days 4-6 — this DAG only produces raw results rows. Nothing here
-re-calls a provider once a result is written; that's the whole point
-of the five-stage split (PLAN.md 3.1).
+Drift detection and alerting are separate stages, added on days 5-6 —
+this DAG produces raw results rows and their scores. Scoring never
+re-calls the model *under test* once its result is written; that's the
+whole point of the five-stage split (PLAN.md 3.1). Graded scoring is
+the one stage that does call a provider — the pinned grader — which is
+exactly why it runs as its own stage, after deterministic scoring, so
+its cost stays separable (day 4).
 """
 
 import asyncio
@@ -13,12 +17,15 @@ from decimal import Decimal
 
 from airflow.sdk import dag, task
 from sqlalchemy import func
+from sqlalchemy.orm import joinedload
 
-from watchdog.db.models import Model, ModelPrice, Provider, Result, Run, Suite
+from watchdog.db.models import Model, ModelPrice, Provider, Result, Run, Suite, Task
 from watchdog.db.session import get_session
 from watchdog.git_info import git_sha
 from watchdog.providers.client import ProviderClient
 from watchdog.providers.pricing import Price
+from watchdog.scoring.graded import GRADER_MODEL_NAME, score_graded
+from watchdog.scoring.scorers import DETERMINISTIC_SCORERS
 
 REPEATS = 3
 
@@ -170,25 +177,111 @@ def nightly_pipeline():
         return {"run_id": run_id, "model_id": model_id, "written": written, "skipped_cost_cap": skipped_cost_cap}
 
     @task(trigger_rule="all_done")
-    def finalize_run(execute_results: list[dict]) -> None:
+    def score_deterministic(execute_results: list[dict]) -> dict:
         results = [r for r in execute_results if r]
         if not results:
-            return
+            return {"run_id": None, "scored": 0}
         run_id = results[0]["run_id"]
 
         session = get_session()
+        unscored = (
+            session.query(Result)
+            .join(Task, Task.id == Result.task_id)
+            .options(joinedload(Result.task))
+            .filter(Result.run_id == run_id, Result.score.is_(None), Task.scoring_method != "graded")
+            .all()
+        )
+        scored_count = 0
+        for row in unscored:
+            scorer = DETERMINISTIC_SCORERS.get(row.task.scoring_method)
+            if scorer is None:
+                continue
+            score_result = scorer(row.output_text, row.task.expected)
+            row.score = score_result.score
+            row.scorer = row.task.scoring_method
+            scored_count += 1
+        session.commit()
+        session.close()
+        print(f"run {run_id}: scored {scored_count} deterministic rows — no provider calls")
+        return {"run_id": run_id, "scored": scored_count}
+
+    @task(trigger_rule="all_done")
+    def score_graded_stage(deterministic_result: dict) -> dict:
+        run_id = deterministic_result.get("run_id")
+        if run_id is None:
+            return {"run_id": None, "graded": 0, "cost_usd": "0"}
+
+        session = get_session()
+        unscored = (
+            session.query(Result)
+            .join(Task, Task.id == Result.task_id)
+            .options(joinedload(Result.task))
+            .filter(Result.run_id == run_id, Result.score.is_(None), Task.scoring_method == "graded")
+            .all()
+        )
+        if not unscored:
+            session.close()
+            return {"run_id": run_id, "graded": 0, "cost_usd": "0"}
+
+        grader_model = session.query(Model).filter_by(name=GRADER_MODEL_NAME).one()
+        provider = grader_model.provider
+        today = date.today()
+        price_row = (
+            session.query(ModelPrice)
+            .filter(ModelPrice.model_id == grader_model.id, ModelPrice.effective_from <= today)
+            .order_by(ModelPrice.effective_from.desc())
+            .first()
+        )
+        grader_price = Price(price_row.input_price_per_million, price_row.output_price_per_million)
+
+        total_cost = Decimal("0")
+        graded_count = 0
+
+        async def _grade_all() -> None:
+            nonlocal total_cost, graded_count
+            api_key = os.environ[provider.credential_env_var]
+            async with ProviderClient(
+                provider.name, provider.base_url, api_key, concurrency_limit=provider.concurrency_limit
+            ) as client:
+                for row in unscored:
+                    graded = await score_graded(row.output_text, row.task.rubric, client, grader_price)
+                    row.score = graded.score_result.score
+                    row.scorer = "graded"
+                    row.grader_model_id = grader_model.id
+                    if graded.grader_cost_usd:
+                        total_cost += graded.grader_cost_usd
+                    graded_count += 1
+
+        asyncio.run(_grade_all())
+        session.commit()
+        session.close()
+        print(f"run {run_id}: graded {graded_count} rows — cost ${total_cost} (grader: {GRADER_MODEL_NAME})")
+        return {"run_id": run_id, "graded": graded_count, "cost_usd": str(total_cost)}
+
+    @task(trigger_rule="all_done")
+    def finalize_run(graded_result: dict) -> None:
+        run_id = graded_result.get("run_id")
+        if run_id is None:
+            return
+
+        session = get_session()
         run = session.get(Run, run_id)
-        run.total_cost_usd = _current_total(session, run_id)
+        task_cost = _current_total(session, run_id)
+        grading_cost = Decimal(graded_result.get("cost_usd") or "0")
+        run.total_cost_usd = task_cost + grading_cost
         run.finished_at = datetime.now(timezone.utc)
         if run.status == "running":
             run.status = "completed"
         session.commit()
 
-        total_written = sum(r["written"] for r in results)
-        print(f"run {run_id}: status={run.status} total_cost_usd={run.total_cost_usd} written={total_written}")
+        print(
+            f"run {run_id}: status={run.status} total_cost_usd={run.total_cost_usd} "
+            f"(task_cost={task_cost} grading_cost={grading_cost})"
+        )
         session.close()
 
-    finalize_run(execute.expand(model_work=load_registry()))
+    execute_results = execute.expand(model_work=load_registry())
+    finalize_run(score_graded_stage(score_deterministic(execute_results)))
 
 
 nightly_pipeline()
