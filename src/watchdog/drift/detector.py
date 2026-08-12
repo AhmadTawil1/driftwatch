@@ -22,7 +22,7 @@ WINDOW_NIGHTS = 14
 MIN_NIGHTS_FOR_BASELINE = 7
 # Tuned against synthetic drift/noise data in the next section — this
 # is a starting value, not a final one.
-Z_THRESHOLD = 2.0
+Z_THRESHOLD = 3.0
 # A window with zero historical variance would otherwise divide by
 # zero; flooring it keeps z finite (and very large) instead of NaN.
 STDEV_EPSILON = 1e-6
