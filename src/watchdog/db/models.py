@@ -166,10 +166,15 @@ class DriftCheck(Base, CreatedAtMixin):
     category: Mapped[str] = mapped_column(String(64), nullable=False)
     metric: Mapped[str] = mapped_column(String(32), nullable=False)
     tonight_mean: Mapped[Numeric] = mapped_column(Numeric(12, 6), nullable=False)
-    window_mean: Mapped[Numeric] = mapped_column(Numeric(12, 6), nullable=False)
-    window_stdev: Mapped[Numeric] = mapped_column(Numeric(12, 6), nullable=False)
-    delta: Mapped[Numeric] = mapped_column(Numeric(12, 6), nullable=False)
-    z_score: Mapped[Numeric] = mapped_column(Numeric(12, 6), nullable=False)
+    # Null on a cold-start or version-reset row — there's no baseline to
+    # report a mean/stdev/delta/z for when no comparison was actually
+    # made. A row still gets written either way (every attempt is
+    # recorded), but NULL here is what distinguishes "we checked and
+    # found nothing" from "we didn't have enough history to check."
+    window_mean: Mapped[Numeric | None] = mapped_column(Numeric(12, 6), nullable=True)
+    window_stdev: Mapped[Numeric | None] = mapped_column(Numeric(12, 6), nullable=True)
+    delta: Mapped[Numeric | None] = mapped_column(Numeric(12, 6), nullable=True)
+    z_score: Mapped[Numeric | None] = mapped_column(Numeric(12, 6), nullable=True)
     fired: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
     model: Mapped["Model"] = relationship()
