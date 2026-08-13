@@ -129,6 +129,15 @@ def test_numeric_tolerance_extracts_number_from_prose():
     assert score_numeric_tolerance("The answer is 32 apples.", "32").score == 1.0
 
 
+def test_numeric_tolerance_uses_last_number_not_first():
+    # A reasoning-shown answer states intermediate numbers before the
+    # final one — the final one is what should be checked.
+    output = "1. Cost was 80, sold for 100. 2. Profit margin is 25%."
+    assert score_numeric_tolerance(output, "25").score == 1.0
+    result = score_numeric_tolerance(output, "80")
+    assert result.score == 0.0
+
+
 def test_numeric_tolerance_handles_thousands_separator():
     assert score_numeric_tolerance("300,000", "300000").score == 1.0
 

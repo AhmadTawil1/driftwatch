@@ -1,13 +1,20 @@
 """load_registry -> execute (one mapped task per active model) ->
-score_deterministic -> score_graded -> detect_drift -> finalize_run.
+score_deterministic -> score_graded -> detect_drift -> notify -> finalize_run.
 
-Alerting is the remaining stage, added on day 6. Scoring never re-calls
-the model *under test* once its result is written; that's the whole
-point of the five-stage split (PLAN.md 3.1). Graded scoring is the one
-stage that does call a provider — the pinned grader — which is exactly
-why it runs as its own stage, after deterministic scoring, so its cost
-stays separable (day 4). detect_drift never calls a provider at all —
-it only ever reads back what scoring already wrote (day 5).
+All five stages from the plan's architecture (PLAN.md 3.1) are now
+wired in. Scoring never re-calls the model *under test* once its
+result is written. Graded scoring is the one scoring stage that does
+call a provider — the pinned grader — which is exactly why it runs as
+its own stage, after deterministic scoring, so its cost stays
+separable (day 4). detect_drift and notify never call a provider at
+all — they only ever read back what scoring already wrote (day 5) and
+what detect_drift already decided (day 6).
+
+Idempotent per calendar date (N1): load_registry refuses to start a
+second run for a date that already has a completed or aborted_cost_cap
+run, raising AirflowSkipException — which propagates as a clean skip
+to execute, not a failure, and lets the rest of the DAG's all_done
+stages no-op safely on the empty result.
 """
 
 import asyncio
@@ -15,6 +22,7 @@ import os
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
+from airflow.exceptions import AirflowSkipException
 from airflow.sdk import dag, task
 from sqlalchemy import func
 from sqlalchemy.orm import joinedload
@@ -23,6 +31,7 @@ from watchdog.db.models import Model, ModelPrice, Provider, Result, Run, Suite, 
 from watchdog.db.session import get_session
 from watchdog.drift.detector import detect_for_run
 from watchdog.git_info import git_sha
+from watchdog.notify.notifier import notify_fired_checks
 from watchdog.providers.client import ProviderClient
 from watchdog.providers.pricing import Price
 from watchdog.scoring.graded import GRADER_MODEL_NAME, score_graded
@@ -53,6 +62,23 @@ def nightly_pipeline():
     def load_registry() -> list[dict]:
         session = get_session()
         today = date.today()
+
+        # Idempotency (N1): a finished run for today already means
+        # tonight happened. Without this, re-triggering (by accident,
+        # or via Airflow's own rerun/backfill tooling) would create a
+        # second parallel run and spend a second night's cost for the
+        # same night — the unique constraint on results only stops
+        # duplicate rows *within* one run, not a whole second run.
+        already_ran = (
+            session.query(Run)
+            .filter(func.date(Run.started_at) == today, Run.status.in_(["completed", "aborted_cost_cap"]))
+            .first()
+        )
+        if already_ran is not None:
+            session.close()
+            raise AirflowSkipException(
+                f"a run for {today} already exists (run_id={already_ran.id}, status={already_ran.status}) — skipping"
+            )
 
         suite = session.query(Suite).order_by(Suite.version.desc()).first()
         if suite is None:
@@ -274,15 +300,23 @@ def nightly_pipeline():
         return {**graded_result, "comparisons": len(comparisons), "fired": fired}
 
     @task(trigger_rule="all_done")
-    def finalize_run(drift_result: dict) -> None:
-        run_id = drift_result.get("run_id")
+    def notify(drift_result: dict) -> dict:
+        session = get_session()
+        sent = notify_fired_checks(session)
+        session.close()
+        print(f"notify: {sent} alerts sent")
+        return {**drift_result, "alerts_sent": sent}
+
+    @task(trigger_rule="all_done")
+    def finalize_run(notify_result: dict) -> None:
+        run_id = notify_result.get("run_id")
         if run_id is None:
             return
 
         session = get_session()
         run = session.get(Run, run_id)
         task_cost = _current_total(session, run_id)
-        grading_cost = Decimal(drift_result.get("cost_usd") or "0")
+        grading_cost = Decimal(notify_result.get("cost_usd") or "0")
         run.total_cost_usd = task_cost + grading_cost
         run.finished_at = datetime.now(timezone.utc)
         if run.status == "running":
@@ -292,12 +326,13 @@ def nightly_pipeline():
         print(
             f"run {run_id}: status={run.status} total_cost_usd={run.total_cost_usd} "
             f"(task_cost={task_cost} grading_cost={grading_cost}) "
-            f"drift_fired={drift_result.get('fired')}/{drift_result.get('comparisons')}"
+            f"drift_fired={notify_result.get('fired')}/{notify_result.get('comparisons')} "
+            f"alerts_sent={notify_result.get('alerts_sent')}"
         )
         session.close()
 
     execute_results = execute.expand(model_work=load_registry())
-    finalize_run(detect_drift(score_graded_stage(score_deterministic(execute_results))))
+    finalize_run(notify(detect_drift(score_graded_stage(score_deterministic(execute_results)))))
 
 
 nightly_pipeline()

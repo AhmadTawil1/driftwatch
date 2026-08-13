@@ -78,9 +78,14 @@ def score_json_schema(output_text: str | None, expected: str) -> ScoreResult:
     return ScoreResult(1.0)
 
 
-# Matches the first number in the text, including negatives and decimals
-# and thousands-separator commas (e.g. "300,000" or "-4.5" or "the answer
-# is 32 apples" -> 32).
+# Matches numbers in the text, including negatives and decimals and
+# thousands-separator commas (e.g. "300,000" or "-4.5"). We take the
+# LAST match, not the first: a task that asks for reasoning to be shown
+# ("the cost was 80, sold for 100, so the margin is 32%") states its
+# final answer last, and a naive first-match would grab an intermediate
+# number — or worse, a list marker like the "1" in "1. Calculate the
+# profit". A terse answer ("the answer is 32 apples") only has one
+# number anyway, so this is a strict improvement, not a trade-off.
 _NUMBER_PATTERN = re.compile(r"-?\d[\d,]*\.?\d*")
 _DEFAULT_TOLERANCE = 0.01
 
@@ -90,11 +95,11 @@ def score_numeric_tolerance(
 ) -> ScoreResult:
     if output_text is None:
         return ScoreResult(0.0, "no output to score")
-    match = _NUMBER_PATTERN.search(output_text)
-    if match is None:
+    matches = _NUMBER_PATTERN.findall(output_text)
+    if not matches:
         return ScoreResult(0.0, f"no number found in output {output_text!r}")
     try:
-        actual = float(match.group().replace(",", ""))
+        actual = float(matches[-1].replace(",", ""))
         expected_value = float(expected.replace(",", ""))
     except ValueError as exc:
         return ScoreResult(0.0, f"could not parse number: {exc}")
